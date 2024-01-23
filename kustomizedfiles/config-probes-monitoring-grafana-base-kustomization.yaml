@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: appstudio-probe-monitoring-grafana
+spec: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sa-probe
+  namespace: appstudio-probe-monitoring-grafana
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: read-grafana
+rules:
+- apiGroups:
+  - grafana.integreatly.org
+  resources:
+  - grafanas
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-grafana-binding
+  namespace: appstudio-grafana
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: read-grafana
+subjects:
+- kind: ServiceAccount
+  name: sa-probe
+  namespace: appstudio-probe-monitoring-grafana
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: appstudio-probe-datasource-availability
+  namespace: appstudio-probe-monitoring-grafana
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - command:
+            - /bin/bash
+            - -c
+            - |
+              if oc get grafanas.grafana.integreatly.org -n appstudio-grafana grafana-oauth -o jsonpath='{.status.datasources}' | grep -q prometheus-appstudio-ds
+              then
+                echo 'Datasource prometheus-appstudio-ds is available'
+                exit 0
+              else
+                echo 'Datasource prometheus-appstudio-ds is not available'
+                exit 1
+              fi
+            image: registry.redhat.io/openshift4/ose-cli:v4.12.0
+            name: datasource-availability
+            resources:
+              limits:
+                cpu: 100m
+                memory: 100Mi
+              requests:
+                cpu: 100m
+                memory: 10Mi
+            securityContext:
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+          restartPolicy: Never
+          serviceAccountName: sa-probe
+  schedule: '*/10 * * * *'
